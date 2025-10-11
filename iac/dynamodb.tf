@@ -27,6 +27,10 @@ variable "enable_kms_key_rotation" {
   default     = true
 }
 
+# ============================================================================
+# KMS KEY PARA DYNAMODB
+# ============================================================================
+
 # Clave KMS para cifrado de DynamoDB
 resource "aws_kms_key" "dynamodb_key" {
   description             = "Clave KMS para DynamoDB ${var.project_name}"
@@ -70,7 +74,9 @@ data "aws_iam_policy_document" "kms_policy" {
         aws_iam_role.lambda_registrations_exec_role.arn,
         aws_iam_role.lambda_catalogo_exec_role.arn,
         aws_iam_role.lambda_card_exec_role.arn,
-        aws_iam_role.lambda_orderandshipping_exec_role.arn
+        aws_iam_role.lambda_orderandshipping_exec_role.arn,
+        aws_iam_role.lambda_card_stream_processor_role.arn,
+        aws_iam_role.lambda_order_stream_processor_role.arn
       ]
     }
   }
@@ -212,13 +218,17 @@ resource "aws_dynamodb_table" "products_table" {
   tags = var.common_tags
 }
 
-# Tabla para Tarjetas/Cards
+# Tabla para Carritos/Cards 
 resource "aws_dynamodb_table" "cards_table" {
   name                        = "${var.project_name}-cards"
   billing_mode                = var.dynamodb_billing_mode
   hash_key                    = "cardId"
   range_key                   = "userId"
   deletion_protection_enabled = var.dynamodb_deletion_protection
+  
+  # Stream habilitado
+  stream_enabled   = true
+  stream_view_type = "NEW_AND_OLD_IMAGES"
   
   attribute {
     name = "cardId"
@@ -227,11 +237,6 @@ resource "aws_dynamodb_table" "cards_table" {
 
   attribute {
     name = "userId"
-    type = "S"
-  }
-
-  attribute {
-    name = "cardType"
     type = "S"
   }
 
@@ -245,6 +250,7 @@ resource "aws_dynamodb_table" "cards_table" {
     type = "S"
   }
 
+  # Índice para ver todos los carritos de un usuario
   global_secondary_index {
     name            = "UserCardsIndex"
     hash_key        = "userId"
@@ -253,18 +259,10 @@ resource "aws_dynamodb_table" "cards_table" {
   }
 
   global_secondary_index {
-    name            = "CardTypeIndex"
-    hash_key        = "cardType"
-    range_key       = "creationDate"
-    projection_type = "INCLUDE"
-    non_key_attributes = ["cardId", "userId", "status"]
-  }
-
-  global_secondary_index {
     name            = "StatusIndex"
     hash_key        = "status"
     range_key       = "creationDate"
-    projection_type = "KEYS_ONLY"
+    projection_type = "ALL"
   }
 
   server_side_encryption {
@@ -285,6 +283,10 @@ resource "aws_dynamodb_table" "orders_table" {
   billing_mode                = var.dynamodb_billing_mode
   hash_key                    = "orderId"
   deletion_protection_enabled = var.dynamodb_deletion_protection
+  
+  # Stream habilitado
+  stream_enabled   = true
+  stream_view_type = "NEW_AND_OLD_IMAGES"
   
   attribute {
     name = "orderId"
@@ -669,4 +671,14 @@ output "dynamodb_kms_key_arn" {
 output "dynamodb_kms_key_id" {
   description = "ID de la clave KMS para DynamoDB"
   value       = aws_kms_key.dynamodb_key.key_id
+}
+
+output "cards_table_stream_arn" {
+  description = "ARN del stream de la tabla de tarjetas"
+  value       = aws_dynamodb_table.cards_table.stream_arn
+}
+
+output "orders_table_stream_arn" {
+  description = "ARN del stream de la tabla de órdenes"
+  value       = aws_dynamodb_table.orders_table.stream_arn
 }
